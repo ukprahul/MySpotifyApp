@@ -2,7 +2,7 @@ import axios from 'axios';
 
 // iTunes Search API — no credentials required
 const SEARCH_URL = 'https://itunes.apple.com/search';
-const RSS_URL = 'https://itunes.apple.com/us/rss';
+const RSS_URL = 'https://rss.applemarketingtools.com/api/v2/us/music';
 
 // ─── Types (same shape as before so no other files need changes) ─────────────
 
@@ -84,14 +84,14 @@ export async function getFeaturedPlaylists(): Promise<SpotifyPlaylist[]> {
 }
 
 export async function getNewReleases(): Promise<SpotifyAlbum[]> {
-  const { data } = await axios.get(`${RSS_URL}/newreleases/limit=20/json`);
-  const entries: any[] = data?.feed?.entry ?? [];
-  return entries.map((e) => ({
-    id: e.id?.attributes?.['im:id'] ?? String(Math.random()),
-    name: e['im:name']?.label ?? 'Unknown',
-    images: [{ url: e['im:image']?.[2]?.label ?? '' }],
-    artists: [{ id: '', name: e['im:artist']?.label ?? 'Unknown' }],
-    release_date: e['im:releaseDate']?.label ?? '',
+  const { data } = await axios.get(`${RSS_URL}/most-played/20/albums.json`);
+  const results: any[] = data?.feed?.results ?? [];
+  return results.map((e) => ({
+    id: e.id ?? String(Math.random()),
+    name: e.name ?? 'Unknown',
+    images: [{ url: e.artworkUrl100?.replace('100x100', '400x400') ?? '' }],
+    artists: [{ id: e.artistId ?? '', name: e.artistName ?? 'Unknown' }],
+    release_date: e.releaseDate ?? '',
     total_tracks: 10,
   }));
 }
