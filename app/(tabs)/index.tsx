@@ -1,98 +1,264 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GenreChip } from '@/components/GenreChip';
+import { PlaylistCard } from '@/components/PlaylistCard';
+import { TrackItem } from '@/components/TrackItem';
+import { SC } from '@/constants/SpotifyTheme';
+import { usePlayer } from '@/context/PlayerContext';
+import {
+  getFeaturedPlaylists,
+  getNewReleases,
+  getRecommendations,
+  SpotifyAlbum,
+  SpotifyPlaylist,
+  SpotifyTrack,
+} from '@/services/spotify';
+import { getSavedGenreSeeds, saveGenreSeeds } from '@/services/storage';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+const GENRES = [
+  'pop', 'hip-hop', 'rock', 'electronic', 'r-n-b',
+  'indie', 'jazz', 'classical', 'country', 'latin',
+];
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 17) return 'Good afternoon';
+  return 'Good evening';
+}
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { playQueue, currentTrack } = usePlayer();
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
+  const [albums, setAlbums] = useState<SpotifyAlbum[]>([]);
+  const [recommended, setRecommended] = useState<SpotifyTrack[]>([]);
+  const [selectedGenres, setSelectedGenres] = useState<string[]>(['pop', 'hip-hop', 'indie']);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const seeds = await getSavedGenreSeeds();
+      setSelectedGenres(seeds);
+      const [pl, al, rec] = await Promise.all([
+        getFeaturedPlaylists(),
+        getNewReleases(),
+        getRecommendations(seeds),
+      ]);
+      setPlaylists(pl);
+      setAlbums(al);
+      setRecommended(rec);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load. Add EXPO_PUBLIC_SPOTIFY_CLIENT_ID and EXPO_PUBLIC_SPOTIFY_CLIENT_SECRET to .env.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const toggleGenre = async (genre: string) => {
+    const next = selectedGenres.includes(genre)
+      ? selectedGenres.filter((g) => g !== genre)
+      : [...selectedGenres, genre];
+    if (next.length === 0) return;
+    setSelectedGenres(next);
+    await saveGenreSeeds(next);
+    try {
+      setRecommended(await getRecommendations(next));
+    } catch {}
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.center, { paddingTop: insets.top }]}>
+        <ActivityIndicator color={SC.green} size="large" />
+      </View>
+    );
+  }
+
+  return (
+    <ScrollView
+      style={styles.root}
+      contentContainerStyle={{ paddingBottom: 20 }}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => { setRefreshing(true); load(); }}
+          tintColor={SC.green}
+        />
+      }
+    >
+      {/* Header */}
+      <View style={[styles.header, { paddingTop: insets.top + 12 }]}>
+        <Text style={styles.greeting}>{greeting()}</Text>
+        <Ionicons name="notifications-outline" size={24} color={SC.textPrimary} />
+      </View>
+
+      {error && (
+        <View style={styles.errorBox}>
+          <Ionicons name="alert-circle" size={16} color="#e74c3c" />
+          <Text style={styles.errorText}> {error}</Text>
+        </View>
+      )}
+
+      {/* Genre chips */}
+      <Text style={styles.sectionTitle}>Browse by Genre</Text>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+        {GENRES.map((g) => (
+          <GenreChip key={g} label={g} selected={selectedGenres.includes(g)} onPress={() => toggleGenre(g)} />
+        ))}
+      </ScrollView>
+
+      {/* AI Recommendations */}
+      {recommended.length > 0 && (
+        <>
+          <View style={styles.sectionRow}>
+            <Text style={styles.sectionTitle}>Made for You</Text>
+            <View style={styles.aiBadge}>
+              <Ionicons name="sparkles" size={11} color={SC.green} />
+              <Text style={styles.aiLabel}> AI Pick</Text>
+            </View>
+          </View>
+          <FlatList
+            data={recommended.slice(0, 6)}
+            keyExtractor={(t) => t.id}
+            scrollEnabled={false}
+            renderItem={({ item, index }) => (
+              <TrackItem
+                track={item}
+                isPlaying={currentTrack?.id === item.id}
+                showNumber={index + 1}
+                onPress={() => playQueue(recommended, index)}
+              />
+            )}
+          />
+          <TouchableOpacity
+            style={styles.outlineBtn}
+            onPress={() => playQueue(recommended, 0)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="play" size={14} color={SC.textPrimary} />
+            <Text style={styles.outlineBtnText}> Play all recommendations</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {/* Featured Playlists */}
+      {playlists.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>Featured Playlists</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+            {playlists.map((p) => (
+              <PlaylistCard
+                key={p.id}
+                title={p.name}
+                subtitle={p.description || `${p.tracks.total} tracks`}
+                imageUri={p.images[0]?.url}
+                onPress={() => router.push('/now-playing' as any)}
+              />
+            ))}
+          </ScrollView>
+        </>
+      )}
+
+      {/* New Releases */}
+      {albums.length > 0 && (
+        <>
+          <Text style={styles.sectionTitle}>New Releases</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+            {albums.map((a) => (
+              <PlaylistCard
+                key={a.id}
+                title={a.name}
+                subtitle={a.artists.map((ar) => ar.name).join(', ')}
+                imageUri={a.images[0]?.url}
+                onPress={() => router.push('/now-playing' as any)}
+              />
+            ))}
+          </ScrollView>
+        </>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  root: { flex: 1, backgroundColor: SC.black },
+  center: { flex: 1, backgroundColor: SC.black, alignItems: 'center', justifyContent: 'center' },
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  greeting: { color: SC.textPrimary, fontSize: 22, fontWeight: '700' },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 4,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  sectionTitle: {
+    color: SC.textPrimary,
+    fontSize: 18,
+    fontWeight: '700',
+    paddingHorizontal: 16,
+    marginTop: 20,
+    marginBottom: 12,
   },
+  row: { paddingHorizontal: 16, paddingBottom: 4 },
+  aiBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: SC.elevated,
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginLeft: 8,
+  },
+  aiLabel: { color: SC.green, fontSize: 11, fontWeight: '700' },
+  outlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginHorizontal: 16,
+    marginTop: 8,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: SC.separator,
+  },
+  outlineBtnText: { color: SC.textPrimary, fontSize: 14, fontWeight: '600' },
+  errorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    margin: 16,
+    padding: 12,
+    backgroundColor: '#2a1515',
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#e74c3c',
+  },
+  errorText: { color: '#e74c3c', fontSize: 12, flex: 1 },
 });
