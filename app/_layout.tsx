@@ -2,10 +2,7 @@ import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
-import TrackPlayer from 'react-native-track-player';
 import { PlayerProvider } from '@/context/PlayerContext';
-
-TrackPlayer.registerPlaybackService(() => require('../trackPlayerService'));
 
 export const unstable_settings = {
   anchor: '(tabs)',

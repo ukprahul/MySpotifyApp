@@ -2,25 +2,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import { State } from 'react-native-track-player';
 import { SC } from '@/constants/SpotifyTheme';
 import { usePlayer } from '@/context/PlayerContext';
 
 export function NowPlayingBar() {
-  const { currentTrack, playbackState, playPause, next, progress } = usePlayer();
+  const { currentTrack, isPlaying, playPause, next, progress } = usePlayer();
   const router = useRouter();
-
-  const progressWidth = useAnimatedStyle(() => ({
-    width: withTiming(
-      progress.duration > 0 ? `${(progress.position / progress.duration) * 100}%` as any : '0%',
-      { duration: 300 },
-    ),
-  }));
 
   if (!currentTrack) return null;
 
-  const isPlaying = playbackState === State.Playing;
+  const progressPct = progress.duration > 0 ? (progress.position / progress.duration) * 100 : 0;
   const artwork = currentTrack.album.images[0]?.url;
   const artistStr = currentTrack.artists.map((a) => a.name).join(', ');
 
@@ -31,7 +22,7 @@ export function NowPlayingBar() {
       onPress={() => router.push('/now-playing' as any)}
     >
       <View style={styles.progressTrack}>
-        <Animated.View style={[styles.progressFill, progressWidth]} />
+        <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
       </View>
       <View style={styles.inner}>
         <Image

@@ -1,34 +1,20 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
-import { AppState } from 'react-native';
-import TrackPlayer, {
-  Capability,
-  Event,
-  RepeatMode,
-  State,
-  usePlaybackState,
-  useProgress,
-  useTrackPlayerEvents,
-} from 'react-native-track-player';
+import { Audio, AVPlaybackStatus } from 'expo-av';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { SpotifyTrack } from '@/services/spotify';
 
-interface PlayerState {
-  queue: SpotifyTrack[];
-  currentIndex: number;
-  isSetup: boolean;
-  isBuffering: boolean;
+interface Progress {
+  position: number;
+  duration: number;
+  buffered: number;
 }
 
-interface PlayerContextValue extends PlayerState {
+interface PlayerContextValue {
+  queue: SpotifyTrack[];
+  currentIndex: number;
   currentTrack: SpotifyTrack | null;
-  playbackState: State;
-  progress: { position: number; duration: number; buffered: number };
+  isPlaying: boolean;
+  isBuffering: boolean;
+  progress: Progress;
   playQueue: (tracks: SpotifyTrack[], startIndex?: number) => Promise<void>;
   playPause: () => Promise<void>;
   next: () => Promise<void>;
@@ -38,128 +24,120 @@ interface PlayerContextValue extends PlayerState {
 
 const PlayerContext = createContext<PlayerContextValue | null>(null);
 
-async function setupPlayer() {
-  try {
-    await TrackPlayer.setupPlayer({ maxCacheSize: 1024 * 5 });
-    await TrackPlayer.updateOptions({
-      capabilities: [
-        Capability.Play,
-        Capability.Pause,
-        Capability.SkipToNext,
-        Capability.SkipToPrevious,
-        Capability.SeekTo,
-      ],
-      compactCapabilities: [Capability.Play, Capability.Pause, Capability.SkipToNext],
-      notificationCapabilities: [
-        Capability.Play,
-        Capability.Pause,
-        Capability.SkipToNext,
-        Capability.SkipToPrevious,
-      ],
-    });
-    await TrackPlayer.setRepeatMode(RepeatMode.Off);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function toTPTrack(t: SpotifyTrack) {
-  return {
-    id: t.id,
-    url: t.preview_url ?? '',
-    title: t.name,
-    artist: t.artists.map((a) => a.name).join(', '),
-    artwork: t.album.images[0]?.url,
-    duration: t.duration_ms / 1000,
-  };
-}
-
 export function PlayerProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<PlayerState>({
-    queue: [],
-    currentIndex: 0,
-    isSetup: false,
-    isBuffering: false,
-  });
-
-  const playbackState = usePlaybackState();
-  const progress = useProgress(500);
-  const setupRef = useRef(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const [queue, setQueue] = useState<SpotifyTrack[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [isBuffering, setIsBuffering] = useState(false);
+  const [progress, setProgress] = useState<Progress>({ position: 0, duration: 0, buffered: 0 });
 
   useEffect(() => {
-    if (setupRef.current) return;
-    setupRef.current = true;
-    setupPlayer().then((ok) => {
-      setState((s) => ({ ...s, isSetup: ok }));
+    Audio.setAudioModeAsync({
+      staysActiveInBackground: true,
+      playsInSilentModeIOS: true,
     });
+    return () => {
+      soundRef.current?.unloadAsync();
+    };
   }, []);
 
-  useTrackPlayerEvents([Event.PlaybackActiveTrackChanged], async (event) => {
-    if (event.index != null) {
-      setState((s) => ({ ...s, currentIndex: event.index! }));
-    }
-  });
+  const loadAndPlay = useCallback(async (tracks: SpotifyTrack[], index: number) => {
+    const track = tracks[index];
+    if (!track?.preview_url) return;
 
-  useTrackPlayerEvents([Event.PlaybackState], (event) => {
-    setState((s) => ({
-      ...s,
-      isBuffering: event.state === State.Buffering || event.state === State.Loading,
-    }));
-  });
+    setIsBuffering(true);
+
+    if (soundRef.current) {
+      await soundRef.current.unloadAsync();
+      soundRef.current = null;
+    }
+
+    const { sound } = await Audio.Sound.createAsync(
+      { uri: track.preview_url },
+      { shouldPlay: true },
+      (status: AVPlaybackStatus) => {
+        if (!status.isLoaded) return;
+        setIsPlaying(status.isPlaying);
+        setIsBuffering(status.isBuffering);
+        setProgress({
+          position: status.positionMillis / 1000,
+          duration: (status.durationMillis ?? 0) / 1000,
+          buffered: 0,
+        });
+        if (status.didJustFinish) {
+          const next = index + 1;
+          if (next < tracks.length) {
+            loadAndPlay(tracks, next);
+            setCurrentIndex(next);
+          } else {
+            setIsPlaying(false);
+          }
+        }
+      },
+    );
+
+    soundRef.current = sound;
+    setIsBuffering(false);
+  }, []);
 
   const playQueue = useCallback(
     async (tracks: SpotifyTrack[], startIndex = 0) => {
-      if (!state.isSetup) return;
       const playable = tracks.filter((t) => t.preview_url);
       if (playable.length === 0) return;
-      await TrackPlayer.reset();
-      await TrackPlayer.add(playable.map(toTPTrack));
-      await TrackPlayer.skip(Math.min(startIndex, playable.length - 1));
-      await TrackPlayer.play();
-      setState((s) => ({ ...s, queue: playable, currentIndex: startIndex }));
+      setQueue(playable);
+      setCurrentIndex(startIndex);
+      await loadAndPlay(playable, startIndex);
     },
-    [state.isSetup],
+    [loadAndPlay],
   );
 
   const playPause = useCallback(async () => {
-    const s = await TrackPlayer.getState();
-    if (s === State.Playing) {
-      await TrackPlayer.pause();
+    if (!soundRef.current) return;
+    const status = await soundRef.current.getStatusAsync();
+    if (!status.isLoaded) return;
+    if (status.isPlaying) {
+      await soundRef.current.pauseAsync();
     } else {
-      await TrackPlayer.play();
+      await soundRef.current.playAsync();
     }
   }, []);
 
   const next = useCallback(async () => {
-    await TrackPlayer.skipToNext();
-  }, []);
+    const nextIndex = currentIndex + 1;
+    if (nextIndex < queue.length) {
+      setCurrentIndex(nextIndex);
+      await loadAndPlay(queue, nextIndex);
+    }
+  }, [currentIndex, queue, loadAndPlay]);
 
   const previous = useCallback(async () => {
     if (progress.position > 3) {
-      await TrackPlayer.seekTo(0);
+      await soundRef.current?.setPositionAsync(0);
     } else {
-      await TrackPlayer.skipToPrevious();
+      const prevIndex = currentIndex - 1;
+      if (prevIndex >= 0) {
+        setCurrentIndex(prevIndex);
+        await loadAndPlay(queue, prevIndex);
+      }
     }
-  }, [progress.position]);
+  }, [currentIndex, queue, progress.position, loadAndPlay]);
 
   const seekTo = useCallback(async (seconds: number) => {
-    await TrackPlayer.seekTo(seconds);
+    await soundRef.current?.setPositionAsync(seconds * 1000);
   }, []);
 
-  const currentTrack = state.queue[state.currentIndex] ?? null;
+  const currentTrack = queue[currentIndex] ?? null;
 
   return (
     <PlayerContext.Provider
       value={{
-        ...state,
+        queue,
+        currentIndex,
         currentTrack,
-        playbackState: playbackState.state ?? State.None,
-        progress: {
-          position: progress.position,
-          duration: progress.duration,
-          buffered: progress.buffered,
-        },
+        isPlaying,
+        isBuffering,
+        progress,
         playQueue,
         playPause,
         next,

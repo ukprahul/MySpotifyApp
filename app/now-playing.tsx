@@ -17,7 +17,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { State } from 'react-native-track-player';
 import { SC } from '@/constants/SpotifyTheme';
 import { usePlayer } from '@/context/PlayerContext';
 import { isLiked, toggleLike } from '@/services/storage';
@@ -34,7 +33,7 @@ function formatTime(seconds: number): string {
 export default function NowPlayingScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { currentTrack, playbackState, progress, playPause, next, previous, seekTo } = usePlayer();
+  const { currentTrack, isPlaying, progress, playPause, next, previous, seekTo } = usePlayer();
 
   const [liked, setLiked] = useState(false);
   const artworkScale = useSharedValue(1);
@@ -42,11 +41,11 @@ export default function NowPlayingScreen() {
   useEffect(() => {
     if (!currentTrack) return;
     isLiked(currentTrack.id).then(setLiked);
-    artworkScale.value = withSpring(playbackState === State.Playing ? 1 : 0.88, {
+    artworkScale.value = withSpring(isPlaying ? 1 : 0.88, {
       damping: 12,
       stiffness: 80,
     });
-  }, [currentTrack?.id, playbackState]);
+  }, [currentTrack?.id, isPlaying]);
 
   const artworkStyle = useAnimatedStyle(() => ({
     transform: [{ scale: artworkScale.value }],
@@ -67,7 +66,6 @@ export default function NowPlayingScreen() {
 
   const artwork = currentTrack?.album.images[0]?.url;
   const artistStr = currentTrack?.artists.map((a) => a.name).join(', ') ?? '';
-  const isPlaying = playbackState === State.Playing;
   const progressRatio = progress.duration > 0 ? progress.position / progress.duration : 0;
 
   if (!currentTrack) {
