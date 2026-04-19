@@ -20,6 +20,7 @@ import { usePlayer } from '@/context/PlayerContext';
 import {
   getFeaturedPlaylists,
   getNewReleases,
+  getPlaylistTracks,
   getRecommendations,
   SpotifyAlbum,
   SpotifyPlaylist,
@@ -66,7 +67,7 @@ export default function HomeScreen() {
       setAlbums(al);
       setRecommended(rec);
     } catch (e: any) {
-      setError(e?.message ?? 'Failed to load. Add EXPO_PUBLIC_SPOTIFY_CLIENT_ID and EXPO_PUBLIC_SPOTIFY_CLIENT_SECRET to .env.');
+      setError(e?.message ?? 'Failed to load. Check your internet connection.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -173,7 +174,12 @@ export default function HomeScreen() {
                 title={p.name}
                 subtitle={p.description || `${p.tracks.total} tracks`}
                 imageUri={p.images[0]?.url}
-                onPress={() => router.push('/now-playing' as any)}
+                onPress={async () => {
+                  try {
+                    const tracks = await getPlaylistTracks(p.id);
+                    if (tracks.length > 0) await playQueue(tracks, 0);
+                  } catch {}
+                }}
               />
             ))}
           </ScrollView>
